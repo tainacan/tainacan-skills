@@ -1,0 +1,29 @@
+{
+  "name": "tainacan-skills",
+  "version": "1.0.0",
+  "description": "Agent skills for Tainacan WordPress plugin development",
+  "bin": {
+    "tainacan-skills": "bin/cli.mjs"
+  },
+  "type": "module",
+  "keywords": [
+    "tainacan",
+    "wordpress",
+    "claude-code",
+    "agent-skills",
+    "ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tainacan/tainacan-skills.git"
+  },
+  "license": "GPL-2.0-or-later",
+  "files": [
+    "bin/",
+    "skills/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
