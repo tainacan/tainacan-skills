@@ -159,6 +159,65 @@ grep -rn 'do_action\|apply_filters' src/classes/ --include='*.php'
 The plugin's `generate_docs.sh` can produce hook documentation via
 `wp-documentor` (requires Composer dev dependencies).
 
+## Extending Tainacan from a plugin
+
+### Before you start
+
+- Declare `Requires Plugins: tainacan` in the plugin header (WordPress 6.5+).
+- Loading order: `tainacan-register-metadata-type`,
+  `tainacan-register-filter-type` and `tainacan-register-vuejs-plugin` fire
+  **while the Tainacan file is included**. Register the `add_action` at the
+  top level of the plugin file, not inside `plugins_loaded`.
+- Access repositories: `tainacan_items()`, `tainacan_metadata()`,
+  `tainacan_collections()` etc., or `\Tainacan\Repositories\X::get_instance()`.
+  Never `new`.
+
+### Extension points
+
+**Admin form hooks** (`tainacan-register-admin-hooks`):
+```php
+add_action( 'tainacan-register-admin-hooks', function () {
+    tainacan_register_admin_hook( 'item', function () {
+        ob_start();
+        include __DIR__ . '/views/field.php';
+        return (string) ob_get_clean();  // MUST return string
+    }, 'end-left' );  // begin-left, begin-right, end-left, end-right
+} );
+add_action( 'tainacan-insert-tainacan-item', function ( $item ) { /* save */ } );
+```
+
+**Faceted search, before/after each item** (JS, `wp.hooks`):
+```js
+const badge = ( html, item ) => html + '<span class="my-plugin-badge"></span>';
+wp.hooks.addFilter( 'tainacan_faceted_search_collection_item_after', 'my-plugin', badge );
+wp.hooks.addFilter( 'tainacan_faceted_search_item_after', 'my-plugin', badge );
+```
+
+**Metadatum value on item page**: types with custom HTML apply
+`tainacan-item-metadata-get-value-as-html--type-<type>`. The generic filter
+`tainacan-item-metadata-get-value-as-html` only runs for numeric, selectbox
+and core-title.
+
+**Custom metadata type**: extend `\Tainacan\Metadata_Types\Metadata_Type`;
+register in `add_action( 'tainacan-register-metadata-type', fn( $helper ) =>
+$helper->register_metadata_type( $handle, $class, $script ) )`. Options in
+`metadata_type_options` and index `_option_<key>`.
+
+**Custom filter type**: extend `Filter_Type`;
+`tainacan-register-filter-type` + `register_filter_type()`. Options in
+`filter_type_options` (no `_option_` index).
+
+**Background process**: `do_action( 'tainacan-register-generic_process' )` and
+`Generic_Process_Handler::get_instance()->register_generic_process(...)`.
+
+**Importer / exporter / exposer / mapper**: via `tainacan-register-importers`,
+`-exporters`, `-exposers`, `-mappers` hooks.
+
+**Entity save hooks**: `tainacan-pre-insert`, `tainacan-insert`
+(`$obj, $diffs, $is_update`), `tainacan-insert-<post_type>`,
+`tainacan-deleted`. Every `insert()` generates a log; in bulk,
+`$repo->disable_logs()` and reactivate afterwards.
+
 ## Pitfalls
 
 - Hook names are not always prefixed with `tainacan`; some use post type names
@@ -167,3 +226,9 @@ The plugin's `generate_docs.sh` can produce hook documentation via
   in the callback body.
 - Third-party code hooking into entity lifecycle must handle both create and
   update cases (both trigger `tainacan-insert`).
+- The item list uses `:key="index"`: the element is reused between pages; do
+  not store state in the DOM.
+- Term anchors come with single quotes inside the filter and double quotes on
+  the final page (`wp_kses` rewrites): match with regex that accepts both.
+- `metadata_type_options` index `_option_<key>` is never cleaned: a removed key
+  leaves the old `_option_` behind.
