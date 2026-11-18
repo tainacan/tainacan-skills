@@ -5,19 +5,30 @@ WordPress plugin and its ecosystem.
 
 ## Install
 
+From the project that should receive the skills (Node 18+):
+
 ```sh
 npx tainacan-skills
 ```
 
-Interactive prompt lets you pick which skills to install into `.claude/skills/`.
+The prompt asks which skills to copy. By default each one is written to both directories editors scan:
 
-Or install specific skills directly:
+| Directory | Editors |
+|---|---|
+| `.agents/skills/` | Cursor, OpenAI Codex, Gemini CLI, Google Antigravity, GitHub Copilot, OpenCode |
+| `.claude/skills/` | Claude Code |
+
+Cursor also scans `.claude/skills/` for compatibility, so a default install can list each skill twice there. Use `--tools=agents` when the project is opened from Cursor, Codex, or Gemini and does not need a separate Claude Code copy.
 
 ```sh
 npx tainacan-skills install tainacan-developer
-npx tainacan-skills install tainacan-designer tainacan-data
-npx tainacan-skills install  # all skills
+npx tainacan-skills install --tools=agents tainacan-developer tainacan-ops
+npx tainacan-skills install --tools=claude          # Claude Code only
+npx tainacan-skills install                         # all skills, both directories
+npx tainacan-skills list
 ```
+
+`--tools` accepts `agents`, `claude`, or `all` (the default). Several tools are a comma-separated list (`--tools=agents,claude`).
 
 ## Skills
 
@@ -91,13 +102,13 @@ tainacan-skills/
 
 ### With npx (recommended)
 
-Run from any project directory to install skills into `.claude/skills/`:
+Run from the project directory. See [Install](#install) for the directory each editor reads and for `--tools`.
 
 ```sh
-npx tainacan-skills                        # interactive prompt
-npx tainacan-skills install tainacan-developer  # specific skill
-npx tainacan-skills install                # all skills
-npx tainacan-skills list                   # see what's available
+npx tainacan-skills                              # interactive prompt
+npx tainacan-skills install tainacan-developer   # one skill, both directories
+npx tainacan-skills install --tools=agents       # all skills, shared directory only
+npx tainacan-skills list                         # see what's available
 ```
 
 ### With a sibling clone
