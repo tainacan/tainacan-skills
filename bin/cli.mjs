@@ -1,13 +1,28 @@
 #!/usr/bin/env node
 
-import { readdir, cp, mkdir, readFile, access } from 'node:fs/promises';
+import { cp, mkdir, access } from 'node:fs/promises';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SKILLS_DIR = resolve(__dirname, '..', 'skills');
-const TARGET_DIR = resolve(process.cwd(), '.claude', 'skills');
+
+// Two project directories cover the editors that scan skills.
+// `.agents/skills` is the shared Agent Skills path (Cursor, Codex, Gemini CLI,
+// Antigravity, Copilot, OpenCode). Claude Code scans `.claude/skills` and does
+// not read `.agents/skills`. Cursor also scans `.claude/skills`, so installing
+// both can list each skill twice there; `--tools=agents` avoids that copy.
+const DESTINATIONS = {
+  agents: {
+    dir: '.agents/skills',
+    editors: 'Cursor, Codex, Gemini CLI, Antigravity, Copilot, OpenCode',
+  },
+  claude: {
+    dir: '.claude/skills',
+    editors: 'Claude Code',
+  },
+};
 
 const SKILLS = {
   'tainacan-developer':   'Core plugin development: PHP, REST API, data model, testing, build pipeline',
@@ -33,26 +48,86 @@ async function listSkills() {
   }
 }
 
-async function installSkills(names) {
-  await mkdir(TARGET_DIR, { recursive: true });
+function normalizeTools(raw) {
+  const names = raw
+    .flatMap((value) => value.split(','))
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
 
-  for (const name of names) {
-    const src = join(SKILLS_DIR, name);
-    const dst = join(TARGET_DIR, name);
+  if (names.length === 0 || names.includes('all'))
+    return ['agents', 'claude'];
 
-    if (!await exists(src)) {
-      console.error(`  ✗ Skill "${name}" not found`);
-      continue;
-    }
-
-    await cp(src, dst, { recursive: true, force: true });
-    console.log(`  ✓ ${name} → .claude/skills/${name}/`);
+  const unknown = names.filter((name) => !DESTINATIONS[name]);
+  if (unknown.length > 0) {
+    console.error(`  Unknown tool "${unknown.join(', ')}". Use agents, claude, or all.`);
+    return null;
   }
 
-  console.log('\nDone. Skills are ready in .claude/skills/');
+  return [...new Set(names)];
 }
 
-async function interactive() {
+function parseArgs(argv) {
+  const rawTools = [];
+  const positionals = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--tools') {
+      const value = argv[++i];
+      if (!value) {
+        console.error('  --tools needs a value: agents, claude, or all.');
+        return null;
+      }
+      rawTools.push(value);
+    } else if (arg.startsWith('--tools=')) {
+      rawTools.push(arg.slice('--tools='.length));
+    } else {
+      positionals.push(arg);
+    }
+  }
+
+  const tools = normalizeTools(rawTools);
+  if (!tools)
+    return null;
+
+  return { tools, positionals };
+}
+
+async function installSkills(names, tools) {
+  const missing = [];
+  for (const name of names) {
+    if (!await exists(join(SKILLS_DIR, name)))
+      missing.push(name);
+  }
+
+  if (missing.length === names.length) {
+    for (const name of missing)
+      console.error(`  ✗ Skill "${name}" not found`);
+    return;
+  }
+
+  for (const tool of tools) {
+    const destination = DESTINATIONS[tool];
+    const targetDir = resolve(process.cwd(), destination.dir);
+    await mkdir(targetDir, { recursive: true });
+
+    for (const name of names) {
+      if (missing.includes(name)) {
+        console.error(`  ✗ Skill "${name}" not found`);
+        continue;
+      }
+
+      await cp(join(SKILLS_DIR, name), join(targetDir, name), { recursive: true, force: true });
+      console.log(`  ✓ ${name} → ${destination.dir}/${name}/`);
+    }
+
+    console.log(`    ${destination.editors}`);
+  }
+
+  console.log('\nDone.');
+}
+
+async function interactive(tools) {
   console.log('\n  Tainacan Skills Installer\n');
   console.log('  Which skills do you need?\n');
 
@@ -88,15 +163,47 @@ async function interactive() {
   }
 
   console.log('');
-  await installSkills(selected);
+  await installSkills(selected, tools);
+}
+
+function helpText() {
+  return `
+  tainacan-skills — Agent skills for Tainacan development
+
+  Usage:
+    npx tainacan-skills                        Interactive installer
+    npx tainacan-skills install                Install all skills
+    npx tainacan-skills install <name>         Install specific skill(s)
+    npx tainacan-skills list                   List available skills
+    npx tainacan-skills help                   Show this help
+
+  Skills are copied into the current directory. The default writes both
+  destinations, which together cover the editors below.
+
+    --tools=agents    .agents/skills/   Cursor, Codex, Gemini CLI, Antigravity, Copilot, OpenCode
+    --tools=claude    .claude/skills/   Claude Code
+    --tools=all       both (default)
+
+  Cursor also reads .claude/skills/. Use --tools=agents when that second copy
+  would list each skill twice.
+
+  Available skills:
+${Object.entries(SKILLS).map(([n, d]) => `    ${n.padEnd(22)} ${d}`).join('\n')}
+`;
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const command = args[0];
+  const parsed = parseArgs(process.argv.slice(2));
+  if (!parsed) {
+    process.exitCode = 1;
+    return;
+  }
+
+  const { tools, positionals } = parsed;
+  const command = positionals[0];
 
   if (!command) {
-    await interactive();
+    await interactive(tools);
     return;
   }
 
@@ -106,38 +213,20 @@ async function main() {
       break;
 
     case 'install': {
-      const names = args.slice(1);
-      if (names.length === 0) {
-        await installSkills(Object.keys(SKILLS));
-      } else {
-        await installSkills(names);
-      }
+      const names = positionals.slice(1);
+      await installSkills(names.length === 0 ? Object.keys(SKILLS) : names, tools);
       break;
     }
 
     case 'help':
     case '--help':
     case '-h':
-      console.log(`
-  tainacan-skills — Agent skills for Tainacan development
-
-  Usage:
-    npx tainacan-skills                Interactive installer
-    npx tainacan-skills install        Install all skills
-    npx tainacan-skills install <name> Install specific skill(s)
-    npx tainacan-skills list           List available skills
-    npx tainacan-skills help           Show this help
-
-  Skills are copied to .claude/skills/ in the current directory.
-
-  Available skills:
-${Object.entries(SKILLS).map(([n, d]) => `    ${n.padEnd(22)} ${d}`).join('\n')}
-`);
+      console.log(helpText());
       break;
 
     default:
       if (SKILLS[command]) {
-        await installSkills([command]);
+        await installSkills([command], tools);
       } else {
         console.error(`  Unknown command: ${command}\n  Run "npx tainacan-skills help" for usage.`);
         process.exitCode = 1;
